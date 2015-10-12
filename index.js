@@ -145,7 +145,7 @@ function _cleanCache(message, isFromWorker) {
 	}
 }
 
-function _getCacheSize(message) {
+function _getCacheSize(message, isFromWorker) {
 	message.responseParams = {
 		size: Object.keys(cache).length
 	};
