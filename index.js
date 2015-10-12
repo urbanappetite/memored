@@ -82,11 +82,11 @@ function _sendMessageToMaster(message) {
 	}
 }
 
-function _readCacheValue(message) {
+function _readCacheValue(message, isFromWorker) {
 	var cacheEntry = cache[message.requestParams.key];
 	
 	if (!cacheEntry) {
-		if (cluster.isWorker) {
+		if (isFromWorker) {
 			return _sendMessageToWorker(message);
 		} else {
 			return null;
@@ -109,14 +109,14 @@ function _readCacheValue(message) {
 		}
 	}
 
-	if (cluster.isWorker) {
+	if (isFromWorker) {
 		return _sendMessageToWorker(message);
 	}
 	
 	return message;
 }
 
-function _storeCacheValue(message) {
+function _storeCacheValue(message, isFromWorker) {
 	cache[message.requestParams.key] = new CacheEntry(message.requestParams);
 	if (message.requestParams.ttl) {
 		message.responseParams = {
@@ -124,33 +124,45 @@ function _storeCacheValue(message) {
 		};
 	}
 
-	if (cluster.isWorker) {
+	if (isFromWorker) {
 		_sendMessageToWorker(message);
 	}
 }
 
-function _removeCacheValue(message) {
+function _removeCacheValue(message, isFromWorker) {
 	delete cache[message.requestParams.key];
-	_sendMessageToWorker(message);
+	
+	if (isFromWorker) {
+		_sendMessageToWorker(message);
+	}
 }
 
-function _cleanCache(message) {
+function _cleanCache(message, isFromWorker) {
 	cache = {};
-	_sendMessageToWorker(message);
+	
+	if (isFromWorker) {
+		_sendMessageToWorker(message);
+	}
 }
 
 function _getCacheSize(message) {
 	message.responseParams = {
 		size: Object.keys(cache).length
 	};
-	_sendMessageToWorker(message);
+	
+	if (isFromWorker) {
+		_sendMessageToWorker(message);
+	}
 }
 
-function _getCacheKeys(message) {
+function _getCacheKeys(message, isFromWorker) {
 	message.responseParams = {
 		keys: Object.keys(cache)
 	};
-	_sendMessageToWorker(message);
+	
+	if (isFromWorker) {
+		_sendMessageToWorker(message);
+	}
 }
 
 function _purgeCache() {
@@ -169,22 +181,22 @@ function _masterIncomingMessagesHanlder(message) {
 
 	switch (message.type) {
 		case 'read':
-			_readCacheValue(message);
+			_readCacheValue(message, true);
 			break;
 		case 'store':
-			_storeCacheValue(message);
+			_storeCacheValue(message, true);
 			break;
 		case 'remove':
-			_removeCacheValue(message);
+			_removeCacheValue(message, true);
 			break;
 		case 'clean':
-			_cleanCache(message);
+			_cleanCache(message, true);
 			break;
 		case 'size':
-			_getCacheSize(message);
+			_getCacheSize(message, true);
 			break;
 		case 'keys':
-			_getCacheKeys(message);
+			_getCacheKeys(message, true);
 			break;
 		default:
 			logger.warn('Received an invalid message type:', message.type);
