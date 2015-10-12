@@ -76,6 +76,7 @@ function _sendMessageToMaster(message) {
 	message.workerPid = process.pid;
 	message.id = process.pid + '::' + messagesCounter++;
 	process.send(message);
+	
 	if (message.callback) {
 		activeMessages[message.id] = message;
 	}
@@ -83,7 +84,15 @@ function _sendMessageToMaster(message) {
 
 function _readCacheValue(message) {
 	var cacheEntry = cache[message.requestParams.key];
-	if (!cacheEntry) return _sendMessageToWorker(message);
+	
+	if (!cacheEntry) {
+		if (cluster.isWorker) {
+			return _sendMessageToWorker(message);
+		} else {
+			return null;
+		}
+	}
+	
 	if (cacheEntry.isExpired()) {
 		process.nextTick(function() {
 			delete cache[message.requestParams.key];
@@ -100,7 +109,11 @@ function _readCacheValue(message) {
 		}
 	}
 
-	_sendMessageToWorker(message);
+	if (cluster.isWorker) {
+		return _sendMessageToWorker(message);
+	}
+	
+	return message;
 }
 
 function _storeCacheValue(message) {
@@ -110,7 +123,10 @@ function _storeCacheValue(message) {
 			expirationTime: cache[message.requestParams.key].expirationTime
 		};
 	}
-	_sendMessageToWorker(message);
+
+	if (cluster.isWorker) {
+		_sendMessageToWorker(message);
+	}
 }
 
 function _removeCacheValue(message) {
@@ -236,27 +252,37 @@ function _setup(options) {
 }
 
 function _read(key, callback) {
-	if (cluster.isWorker) {
-		_sendMessageToMaster({
+	
+	var message = {
 			type: 'read',
 			requestParams: {
 				key: key
 			},
 			callback: callback
-		});
+		};
+			
+	if (cluster.isWorker) {
+		_sendMessageToMaster(message);
 	} else {
-		logger.warn('Memored::read# Cannot call this function from master process');
+
+		var responseMessage = _readCacheValue(message);
+		var value = null;
+		
+		if (responseMessage && responseMessage.responseParams) {
+			value = responseMessage.responseParams.value;
+		}
+		
+		callback(null, value);
 	}
 }
 
 function _store(key, value, ttl, callback) {
-	if (cluster.isWorker) {
-		if (callback === undefined) {
-			callback = ttl;
-			ttl = undefined;
-		}
-
-		_sendMessageToMaster({
+	if (callback === undefined) {
+		callback = ttl;
+		ttl = undefined;
+	}
+	
+	var message = {
 			type: 'store',
 			requestParams: {
 				key: key,
@@ -264,9 +290,13 @@ function _store(key, value, ttl, callback) {
 				ttl: ttl
 			},
 			callback: callback
-		});
+		};
+
+	if (cluster.isWorker) {
+		_sendMessageToMaster(message);
 	} else {
-		logger.warn('Memored::store# Cannot call this function from master process');
+		_storeCacheValue(message);
+		callback();
 	}
 }
 
@@ -302,16 +332,14 @@ function _size(callback) {
 			callback: callback
 		});
 	} else {
-		setImmediate(callback,{
-			size: Object.keys(cache).length
-		});
+		callback(Object.keys(cache).length);
 	}
 }
 
 function _reset(callback) {
 	if (cluster.isMaster) {
 		clearInterval(purgeIntervalObj);
-		setImmediate(callback);
+		callback();
 	} else {
 		logger.warn('Memored::reset# Cannot call this function from a worker process');
 	}
@@ -324,9 +352,9 @@ function _keys(callback) {
 			callback: callback
 		});
 	} else {
-		setImmediate(callback,{
-			keys: Object.keys(cache)
-		});
+			
+		
+		callback(null, Object.keys(cache));
 	}
 }
 
